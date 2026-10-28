@@ -166,6 +166,19 @@ class DPCodeParsedAttributeWrapper[
         raise NotImplementedError
 
     @classmethod
+    def _find_wrapper(
+        cls,
+        device: CustomerDevice,
+        dpcodes: str | tuple[str, ...] | None,
+        *,
+        prefer_function: bool = False,
+    ) -> Self | None:
+        """Find a candidate wrapper before checking its parsed attribute."""
+        return super().find_dpcode(
+            device, dpcodes, prefer_function=prefer_function
+        )
+
+    @classmethod
     def find_dpcode(
         cls,
         device: CustomerDevice,
@@ -180,7 +193,7 @@ class DPCodeParsedAttributeWrapper[
         parsed does not provide any attribute.
         """
         if (
-            wrapper := super().find_dpcode(
+            wrapper := cls._find_wrapper(
                 device, dpcodes, prefer_function=prefer_function
             )
         ) is None:

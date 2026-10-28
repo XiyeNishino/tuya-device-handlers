@@ -1,6 +1,6 @@
 """Test DeviceWrapper classes."""
 
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from tuya_sharing import CustomerDevice
@@ -14,6 +14,12 @@ from tuya_device_handlers.device_wrapper.extended import (
     DPCodePercentageWrapper,
     DPCodeRoundedIntegerWrapper,
 )
+from tuya_device_handlers.device_wrapper.sensor import (
+    ElectricityCurrentRawWrapper,
+    ElectricityReactivePowerRawWrapper,
+)
+
+from . import inject_dpcode, inject_dpcode_function, inject_dpcode_status_range
 
 
 @pytest.mark.parametrize(
@@ -87,3 +93,65 @@ def test_get_update_commands(
 
     assert wrapper
     assert wrapper.get_update_commands(mock_device, value) == expected
+
+
+@pytest.mark.parametrize(
+    ("prefer_function", "expected"),
+    [(False, '{"source":"status_range"}'), (True, '{"source":"function"}')],
+)
+def test_parsed_attribute_default_lookup(
+    mock_device: CustomerDevice, prefer_function: bool, expected: str
+) -> None:
+    """Default candidate lookup preserves class and preferred schema."""
+    inject_dpcode(
+        mock_device, "phase_1", "Ag8I/QAETAAA0gAAMgAA3F8A", dptype="Raw"
+    )
+    inject_dpcode_status_range(
+        mock_device, "phase_1", "Raw", '{"source":"status_range"}'
+    )
+    inject_dpcode_function(
+        mock_device, "phase_1", "Raw", '{"source":"function"}'
+    )
+    wrapper = ElectricityCurrentRawWrapper.find_dpcode(
+        mock_device, "phase_1", prefer_function=prefer_function
+    )
+    assert type(wrapper) is ElectricityCurrentRawWrapper
+    assert wrapper.type_information.type_data == expected
+    assert wrapper.read_device_status(mock_device) == 1100
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [("Ag8I/QAETAAA0gAAMgAA3F8A", 50), ("CP0ABEwAANI=", None)],
+    ids=["modern", "legacy"],
+)
+def test_parsed_attribute_overridden_lookup(
+    mock_device: CustomerDevice, status: str, expected: float | None
+) -> None:
+    """Overridden lookup still applies attribute discovery and parsing."""
+
+    class AliasedReactivePowerWrapper(ElectricityReactivePowerRawWrapper):
+        """Resolve an alias through the candidate lookup extension point."""
+
+        @classmethod
+        def _find_wrapper(
+            cls,
+            device: CustomerDevice,
+            dpcodes: str | tuple[str, ...] | None,
+            *,
+            prefer_function: bool = False,
+        ) -> Self | None:
+            if dpcodes != "alias":
+                return None
+            return super()._find_wrapper(
+                device, "phase_1", prefer_function=prefer_function
+            )
+
+    inject_dpcode(mock_device, "phase_1", status, dptype="Raw")
+    wrapper = AliasedReactivePowerWrapper.find_dpcode(mock_device, "alias")
+    if expected is None:
+        assert wrapper is None
+        return
+    assert isinstance(wrapper, AliasedReactivePowerWrapper)
+    assert wrapper.dpcode == "phase_1"
+    assert wrapper.read_device_status(mock_device) == expected
